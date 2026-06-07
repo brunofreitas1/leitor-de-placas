@@ -1,0 +1,28 @@
+{
+  "moradores": [
+    {
+      "nome": "Joao Silva",
+      "placa": "GEP2C00",
+      "apartamento": "101",
+      "veiculo": "Hyundai HB20"
+    },
+    {
+      "nome": "Maria Santos",
+      "placa": "ABC1D23",
+      "apartamento": "202",
+      "veiculo": "Honda Civic"
+    },
+    {
+      "nome": "Carlos Oliveira",
+      "placa": "XYZ4F56",
+      "apartamento": "303",
+      "veiculo": "Toyota Corolla"
+    },
+    {
+      "nome": "Ana Pereira",
+      "placa": "DEF2G34",
+      "apartamento": "104",
+      "veiculo": "Volkswagen Gol"
+    }
+  ]
+}

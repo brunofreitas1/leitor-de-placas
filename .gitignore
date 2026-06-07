@@ -1,0 +1,30 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+env/
+venv/
+.venv/
+
+.idea/
+.vscode/
+*.swp
+*.swo
+
+.DS_Store
+Thumbs.db
+
+# Outputs e logs (gerados em runtime)
+tests/resultado_*.png
+tests/debug_ocr_*.png
+tests/debug_ocr_inv_*.png
+tests/relatorio_testes.csv
+acessos.txt
+acessos.csv
+registro_placas.csv
+
+# Mantém apenas debug_resultado.png como exemplo
+!tests/debug_resultado.png

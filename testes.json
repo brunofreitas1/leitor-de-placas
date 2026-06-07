@@ -1,0 +1,17 @@
+{
+  "imagens": [
+    {"arquivo": "carro.jpg", "placa_esperada": "GEP2C00", "deve_liberar": true},
+    {"arquivo": "Screenshot_20260528_193956_Gallery (1).jpg", "placa_esperada": "GKV8S13", "deve_liberar": false},
+    {"arquivo": "Screenshot_20260528_194015_Gallery.jpg", "placa_esperada": "BYA5271", "deve_liberar": false},
+    {"arquivo": "Screenshot_20260528_194202_Gallery.jpg", "placa_esperada": "OPU9B81", "deve_liberar": false},
+    {"arquivo": "Screenshot_20260528_194318_Gallery.jpg", "placa_esperada": "FZJ5I02", "deve_liberar": false},
+    {"arquivo": "Screenshot_20260528_194459_Gallery.jpg", "placa_esperada": "GIF7E16", "deve_liberar": false},
+    {"arquivo": "Screenshot_20260528_194541_Gallery.jpg", "placa_esperada": "FZJ5I02", "deve_liberar": false},
+    {"arquivo": "Screenshot_20260528_194541_Gallery (2).jpg", "placa_esperada": "FZJ5I02", "deve_liberar": false},
+    {"arquivo": "Screenshot_20260528_195000_Gallery.jpg", "placa_esperada": "EVO6G02", "deve_liberar": false},
+    {"arquivo": "Screenshot_20260528_195000_Gallery (1).jpg", "placa_esperada": "EVO6G02", "deve_liberar": false},
+    {"arquivo": "Screenshot_20260528_195312_Gallery.jpg", "placa_esperada": "EXA3475", "deve_liberar": false},
+    {"arquivo": "Screenshot_20260528_195319_Gallery.jpg", "placa_esperada": "OPU9881", "deve_liberar": false},
+    {"arquivo": "Screenshot_20260528_195319_Gallery (1).jpg", "placa_esperada": "OPU9881", "deve_liberar": false}
+  ]
+}

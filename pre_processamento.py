@@ -6,6 +6,7 @@ import time
 import easyocr
 import numpy as np
 from datetime import datetime
+from acesso import carregar_autorizados, verificar_acesso, registrar_log_txt, registrar_log_csv
 
 REGEX_PLACA = re.compile(r'^[A-Z]{3}[0-9][A-Z][0-9]{2}$|^[A-Z]{3}[0-9]{4}$')
 
@@ -175,6 +176,56 @@ def registrar_placa(placa):
     print(f"[LOG] Placa {placa} registrada em {arquivo}")
 
 
+def processar_imagem(caminho, reader, autorizados, output_dir='tests', verbose=False):
+    img = preprocessar_imagem(caminho)
+    candidatos, _ = encontrar_candidatos(img)
+
+    placa_encontrada = None
+    coords_placa = None
+    for idx, (x, y, w, h) in enumerate(candidatos):
+        if verbose:
+            print(f"  --- Candidato {idx}: ({x},{y},{w},{h}) ---")
+        texto, img_ocr = ocr_placa(img, x, y, w, h, reader, idx=idx)
+        if verbose:
+            print(f"    Melhor: {texto!r}")
+        if REGEX_PLACA.match(texto) and len(texto) == 7:
+            placa_encontrada = texto
+            coords_placa = (x, y, w, h)
+            break
+
+    resultado = {
+        'caminho': caminho,
+        'placa': placa_encontrada,
+        'coords': coords_placa,
+        'liberado': False,
+        'status': 'NAO_DETECTADA',
+        'morador': None,
+        'img': img,
+    }
+
+    if placa_encontrada:
+        liberado, morador = verificar_acesso(placa_encontrada, autorizados)
+        resultado['liberado'] = liberado
+        resultado['morador'] = morador
+        resultado['status'] = 'LIBERADO' if liberado else 'BLOQUEADO'
+
+        x, y, w, h = coords_placa
+        cor = (0, 255, 0) if liberado else (0, 0, 255)
+        cv2.rectangle(img, (x, y), (x + w, y + h), cor, 3)
+        label = f"{placa_encontrada} - {resultado['status']}"
+        cv2.putText(img, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, cor, 2)
+        if liberado and morador:
+            info = f"{morador['nome']} - Apto {morador['apartamento']}"
+            cv2.putText(img, info, (x, y + h + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, cor, 2)
+
+        os.makedirs(output_dir, exist_ok=True)
+        nome_base = os.path.splitext(os.path.basename(caminho))[0]
+        cv2.imwrite(os.path.join(output_dir, f'resultado_{nome_base}.png'), img)
+        resultado['img_path'] = os.path.join(output_dir, f'resultado_{nome_base}.png')
+
+    return resultado
+
+
 def main():
     caminho = 'carro.jpg'
     inicio = time.time()
@@ -182,43 +233,76 @@ def main():
     os.makedirs('tests', exist_ok=True)
 
     print("=" * 60)
-    print("LEITOR DE PLACAS COM EASYOCR")
+    print("SISTEMA DE CONTROLE DE ACESSO - LEITOR DE PLACAS")
     print("=" * 60)
 
-    print("\n[1/4] Carregando modelo EasyOCR...")
+    print("\n[0/5] Carregando banco de moradores...")
+    autorizados = carregar_autorizados('moradores.json')
+    print(f"      {len(autorizados)} moradores cadastrados.")
+
+    print("\n[1/5] Carregando modelo EasyOCR...")
     t0 = time.time()
     reader = easyocr.Reader(['en'], gpu=False, verbose=False)
     print(f"      Modelo carregado em {time.time() - t0:.1f}s")
 
-    print(f"\n[2/4] Carregando imagem: {caminho}")
+    print(f"\n[2/5] Carregando imagem: {caminho}")
     img = preprocessar_imagem(caminho)
 
-    print("[3/4] Detectando candidatos a placa...")
+    print("[3/5] Detectando candidatos a placa...")
     candidatos, _ = encontrar_candidatos(img)
     print(f"      Encontrados {len(candidatos)} candidatos.")
 
-    print("\n[4/4] Executando OCR nos candidatos...")
+    print("\n[4/5] Executando OCR nos candidatos...")
+    placa_encontrada = None
+    coords_placa = None
     for idx, (x, y, w, h) in enumerate(candidatos):
         print(f"\n--- Candidato {idx}: ({x},{y},{w},{h}) ---")
         texto, img_ocr = ocr_placa(img, x, y, w, h, reader, idx=idx)
         print(f"  Melhor resultado: {texto!r}")
 
         if REGEX_PLACA.match(texto) and len(texto) == 7:
-            print(f"\n[SUCESSO] PLACA ENCONTRADA: {texto}")
-            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 3)
-            cv2.putText(
-                img, texto, (x, y - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2
-            )
-            registrar_placa(texto)
-            cv2.imwrite('tests/debug_resultado.png', img)
-            print(f"\nTempo total: {time.time() - inicio:.1f}s")
-            return texto
+            placa_encontrada = texto
+            coords_placa = (x, y, w, h)
+            break
 
-    print("\n[AVISO] Nenhuma placa valida encontrada.")
-    cv2.imwrite('debug_resultado.png', img)
+    print("\n[5/5] Verificando acesso...")
+    if placa_encontrada:
+        x, y, w, h = coords_placa
+        liberado, morador = verificar_acesso(placa_encontrada, autorizados)
+
+        if liberado:
+            cor = (0, 255, 0)
+            status = "LIBERADO"
+            info = f"{morador['nome']} - Apto {morador['apartamento']}"
+            print(f"\n[OK] ACESSO {status}: {placa_encontrada}")
+            print(f"     Morador: {info}")
+            print(f"     Veiculo: {morador.get('veiculo', 'N/A')}")
+        else:
+            cor = (0, 0, 255)
+            status = "BLOQUEADO"
+            print(f"\n[BLOQUEADO] ACESSO {status}: {placa_encontrada}")
+            print(f"     Motivo: Placa nao cadastrada no sistema.")
+
+        cv2.rectangle(img, (x, y), (x + w, y + h), cor, 3)
+        label = f"{placa_encontrada} - {status}"
+        cv2.putText(img, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, cor, 2)
+
+        if liberado:
+            info_text = f"{morador['nome']} - Apto {morador['apartamento']}"
+            cv2.putText(img, info_text, (x, y + h + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, cor, 2)
+
+        log_txt = registrar_log_txt(placa_encontrada, liberado, morador)
+        registrar_log_csv(placa_encontrada, liberado, morador)
+        print(f"     Log: {log_txt}")
+
+        registrar_placa(placa_encontrada)
+        cv2.imwrite('tests/debug_resultado.png', img)
+    else:
+        print("\n[AVISO] Nenhuma placa valida encontrada para verificar acesso.")
+        cv2.imwrite('tests/debug_resultado.png', img)
+
     print(f"\nTempo total: {time.time() - inicio:.1f}s")
-    return None
+    return placa_encontrada
 
 
 if __name__ == "__main__":
