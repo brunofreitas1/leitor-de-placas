@@ -27,7 +27,54 @@ def preprocessar_imagem(caminho_imagem, largura_max=1000):
     return img
 
 
-def encontrar_candidatos(img):
+def encontrar_candidatos_haar(img, cascade_path=None, min_size=(40, 15)):
+    cascatas = [
+        cv2.data.haarcascades + 'haarcascade_russian_plate_number.xml',
+        cv2.data.haarcascades + 'haarcascade_license_plate_rus_16stages.xml',
+    ]
+
+    if cascade_path:
+        cascatas = [cascade_path] + [c for c in cascatas if c != cascade_path]
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    h_img, w_img = gray.shape
+    max_area = (w_img * h_img) * 0.5
+
+    todos_candidatos = []
+    for c_path in cascatas:
+        cascade = cv2.CascadeClassifier(c_path)
+        if cascade.empty():
+            continue
+
+        deteccoes = cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.05,
+            minNeighbors=3,
+            minSize=min_size,
+        )
+
+        for (x, y, w, h) in deteccoes:
+            proporcao = w / float(h)
+            area = w * h
+            if 2.0 <= proporcao <= 5.5 and area >= 1500 and area <= max_area:
+                todos_candidatos.append((x, y, w, h))
+
+    unicos = []
+    for c in todos_candidatos:
+        x, y, w, h = c
+        ja_existe = False
+        for ux, uy, uw, uh in unicos:
+            if abs(x - ux) < 20 and abs(y - uy) < 20 and abs(w - uw) < 20 and abs(h - uh) < 20:
+                ja_existe = True
+                break
+        if not ja_existe:
+            unicos.append(c)
+
+    unicos.sort(key=lambda c: c[2] * c[3], reverse=True)
+    return unicos
+
+
+def encontrar_candidatos_sobel(img):
     img_cinza = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -55,13 +102,23 @@ def encontrar_candidatos(img):
             candidatos.append((x, y, w, h))
 
     candidatos.sort(key=lambda c: c[2] * c[3], reverse=True)
+    return candidatos
+
+
+def encontrar_candidatos(img):
+    candidatos = encontrar_candidatos_haar(img)
+
+    if not candidatos:
+        candidatos = encontrar_candidatos_sobel(img)
+
+    img_cinza = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     return candidatos, img_cinza
 
 
 def corrigir_ocr(texto):
     if not texto:
         return texto
-    if len(texto) < 7:
+    if len(texto) < 6:
         return texto
     if REGEX_PLACA.match(texto):
         return texto
@@ -73,26 +130,73 @@ def corrigir_ocr(texto):
         return texto
 
     corrigido = list(texto)
-    if len(corrigido) == 7:
-        for i in [5, 6]:
-            if corrigido[i] in 'GODQC':
-                corrigido[i] = '0'
-            elif corrigido[i] == 'I':
-                corrigido[i] = '1'
-            elif corrigido[i] == 'B':
-                corrigido[i] = '8'
+    n = len(corrigido)
 
-        if corrigido[3].isalpha():
-            if corrigido[3] == 'Z':
-                corrigido[3] = '2'
-            elif corrigido[3] == 'O':
-                corrigido[3] = '0'
-            elif corrigido[3] == 'I':
-                corrigido[3] = '1'
-            elif corrigido[3] == 'B':
-                corrigido[3] = '8'
+    if n >= 7:
+        alvo = corrigido[:7]
+    else:
+        alvo = corrigido + ['?'] * (7 - n)
 
-    resultado = ''.join(corrigido)
+    for i in [0, 1, 2]:
+        if i < n:
+            if alvo[i] in '0OQD':
+                alvo[i] = 'O'
+            elif alvo[i] in '1I':
+                alvo[i] = 'I'
+            elif alvo[i] in '2Z':
+                alvo[i] = 'Z'
+            elif alvo[i] in '5S':
+                alvo[i] = 'S'
+            elif alvo[i] in '6G':
+                alvo[i] = 'G'
+
+    if 3 < n and alvo[3].isalpha():
+        if alvo[3] in 'Z':
+            alvo[3] = '2'
+        elif alvo[3] in 'OQD':
+            alvo[3] = '0'
+        elif alvo[3] in 'I':
+            alvo[3] = '1'
+        elif alvo[3] in 'B':
+            alvo[3] = '8'
+        elif alvo[3] in 'S':
+            alvo[3] = '5'
+        elif alvo[3] in 'G':
+            alvo[3] = '6'
+
+    for i in [5, 6]:
+        if i < n:
+            if alvo[i] in 'GODQC':
+                alvo[i] = '0'
+            elif alvo[i] in 'I':
+                alvo[i] = '1'
+            elif alvo[i] in 'B':
+                alvo[i] = '8'
+            elif alvo[i] in 'Z':
+                alvo[i] = '2'
+            elif alvo[i] in 'S':
+                alvo[i] = '5'
+
+    if 4 < n:
+        if alvo[4] in '0OQD':
+            alvo[4] = 'O'
+        elif alvo[4] in '1I':
+            alvo[4] = 'I'
+        elif alvo[4] in '2Z':
+            alvo[4] = 'Z'
+        elif alvo[4] in '5S':
+            alvo[4] = 'S'
+        elif alvo[4] in '6G':
+            alvo[4] = 'G'
+
+    if n == 6:
+        prefixo = ''.join(alvo[:6])
+        for digito in '0123456789':
+            tentativa = prefixo + digito
+            if REGEX_PLACA.match(tentativa):
+                return tentativa
+
+    resultado = ''.join(alvo[:7])
     if REGEX_PLACA.match(resultado):
         return resultado
 
@@ -104,16 +208,24 @@ def corrigir_ocr(texto):
     return texto
 
 
-def ocr_placa(img_color, x, y, w, h, reader, idx=0):
-    placa_crop = img_color[y:y + h, x:x + w]
+def ocr_placa(img_color, x, y, w, h, reader, idx=0, is_closeup=False):
+    margem = 5
+    y1 = max(0, y - margem)
+    y2 = min(img_color.shape[0], y + h + margem)
+    x1 = max(0, x - margem)
+    x2 = min(img_color.shape[1], x + w + margem)
+    placa_crop = img_color[y1:y2, x1:x2]
     placa_gray = cv2.cvtColor(placa_crop, cv2.COLOR_BGR2GRAY)
 
     h_c, w_c = placa_gray.shape
 
+    angulos = [0, 2, 4, 6, 8] if is_closeup else [5, 6, 7, 8, 9]
+
     candidatos_validos = []
     todos_textos = []
+    melhor_img = None
 
-    for angulo in [5, 6, 7, 8, 9]:
+    for angulo in angulos:
         center = (w_c // 2, h_c // 2)
         M = cv2.getRotationMatrix2D(center, angulo, 1.0)
         placa_rot = cv2.warpAffine(
@@ -136,13 +248,14 @@ def ocr_placa(img_color, x, y, w, h, reader, idx=0):
             placa_ampliada, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=[255]
         )
 
-        if angulo == 7:
+        if angulo == 7 and not is_closeup:
             cv2.imwrite(f'tests/debug_ocr_c{idx}.png', img_borda)
             img_invertida = cv2.bitwise_not(img_borda)
             cv2.imwrite(f'tests/debug_ocr_inv_c{idx}.png', img_invertida)
             variacoes = [('normal', img_borda), ('invertida', img_invertida)]
         else:
             variacoes = [('normal', img_borda)]
+            melhor_img = img_borda
 
         for nome, img_tentativa in variacoes:
             resultados = reader.readtext(img_tentativa, detail=1, paragraph=False)
@@ -156,13 +269,14 @@ def ocr_placa(img_color, x, y, w, h, reader, idx=0):
 
     if candidatos_validos:
         candidatos_validos.sort(key=lambda x: x[1], reverse=True)
-        return candidatos_validos[0][0], candidatos_validos[0][2]
+        return candidatos_validos[0][0], candidatos_validos[0][1], candidatos_validos[0][2]
 
     if todos_textos:
         todos_textos.sort(key=lambda x: (len(x[0]), x[1]), reverse=True)
-        return todos_textos[0][0], todos_textos[0][2]
+        img_ret = melhor_img if melhor_img is not None else todos_textos[0][2]
+        return todos_textos[0][0], todos_textos[0][1], img_ret
 
-    return '', img_borda
+    return '', 0.0, melhor_img
 
 
 def registrar_placa(placa):
@@ -178,52 +292,74 @@ def registrar_placa(placa):
 
 def processar_imagem(caminho, reader, autorizados, output_dir='tests', verbose=False):
     img = preprocessar_imagem(caminho)
+    h_img, w_img = img.shape[:2]
+
     candidatos, _ = encontrar_candidatos(img)
 
-    placa_encontrada = None
-    coords_placa = None
+    if not candidatos:
+        ratio = w_img / float(h_img)
+        if 2.0 <= ratio <= 5.5:
+            if verbose:
+                print(f"  [FALLBACK] Nenhum candidato, usando imagem inteira ({w_img}x{h_img}, ratio={ratio:.2f})")
+            candidatos = [(0, 0, w_img, h_img)]
+
+    melhores = []
     for idx, (x, y, w, h) in enumerate(candidatos):
+        is_closeup = (x == 0 and y == 0 and w == w_img and h == h_img)
         if verbose:
-            print(f"  --- Candidato {idx}: ({x},{y},{w},{h}) ---")
-        texto, img_ocr = ocr_placa(img, x, y, w, h, reader, idx=idx)
+            print(f"  --- Candidato {idx}: ({x},{y},{w},{h}) closeup={is_closeup} ---")
+        texto, conf, img_ocr = ocr_placa(img, x, y, w, h, reader, idx=idx, is_closeup=is_closeup)
         if verbose:
-            print(f"    Melhor: {texto!r}")
+            print(f"    Resultado: {texto!r} (conf={conf:.2f})")
         if REGEX_PLACA.match(texto) and len(texto) == 7:
-            placa_encontrada = texto
-            coords_placa = (x, y, w, h)
-            break
+            melhores.append((texto, conf, img_ocr, (x, y, w, h)))
 
-    resultado = {
-        'caminho': caminho,
-        'placa': placa_encontrada,
-        'coords': coords_placa,
-        'liberado': False,
-        'status': 'NAO_DETECTADA',
-        'morador': None,
-        'img': img,
-    }
-
-    if placa_encontrada:
-        liberado, morador = verificar_acesso(placa_encontrada, autorizados)
-        resultado['liberado'] = liberado
-        resultado['morador'] = morador
-        resultado['status'] = 'LIBERADO' if liberado else 'BLOQUEADO'
-
-        x, y, w, h = coords_placa
-        cor = (0, 255, 0) if liberado else (0, 0, 255)
-        cv2.rectangle(img, (x, y), (x + w, y + h), cor, 3)
-        label = f"{placa_encontrada} - {resultado['status']}"
-        cv2.putText(img, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, cor, 2)
-        if liberado and morador:
-            info = f"{morador['nome']} - Apto {morador['apartamento']}"
-            cv2.putText(img, info, (x, y + h + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, cor, 2)
-
+    if not melhores:
+        resultado = {
+            'caminho': caminho,
+            'placa': None,
+            'coords': None,
+            'liberado': False,
+            'status': 'NAO_DETECTADA',
+            'morador': None,
+            'img': img,
+        }
         os.makedirs(output_dir, exist_ok=True)
         nome_base = os.path.splitext(os.path.basename(caminho))[0]
         cv2.imwrite(os.path.join(output_dir, f'resultado_{nome_base}.png'), img)
         resultado['img_path'] = os.path.join(output_dir, f'resultado_{nome_base}.png')
+        return resultado
 
-    return resultado
+    melhores.sort(key=lambda m: m[1], reverse=True)
+    placa_encontrada, conf, img_ocr, coords_placa = melhores[0]
+    if verbose:
+        print(f"  [ESCOLHIDO] {placa_encontrada!r} (conf={conf:.2f})")
+
+    liberado, morador = verificar_acesso(placa_encontrada, autorizados)
+
+    x, y, w, h = coords_placa
+    cor = (0, 255, 0) if liberado else (0, 0, 255)
+    cv2.rectangle(img, (x, y), (x + w, y + h), cor, 3)
+    label = f"{placa_encontrada} - {'LIBERADO' if liberado else 'BLOQUEADO'}"
+    cv2.putText(img, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, cor, 2)
+    if liberado and morador:
+        info = f"{morador['nome']} - Apto {morador['apartamento']}"
+        cv2.putText(img, info, (x, y + h + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, cor, 2)
+
+    os.makedirs(output_dir, exist_ok=True)
+    nome_base = os.path.splitext(os.path.basename(caminho))[0]
+    cv2.imwrite(os.path.join(output_dir, f'resultado_{nome_base}.png'), img)
+
+    return {
+        'caminho': caminho,
+        'placa': placa_encontrada,
+        'coords': coords_placa,
+        'liberado': liberado,
+        'status': 'LIBERADO' if liberado else 'BLOQUEADO',
+        'morador': morador,
+        'img': img,
+        'img_path': os.path.join(output_dir, f'resultado_{nome_base}.png'),
+    }
 
 
 def main():
