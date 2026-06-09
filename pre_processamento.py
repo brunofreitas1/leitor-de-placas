@@ -117,17 +117,17 @@ def encontrar_candidatos(img):
 
 def corrigir_ocr(texto):
     if not texto:
-        return texto
+        return texto, False
     if len(texto) < 6:
-        return texto
+        return texto, False
     if REGEX_PLACA.match(texto):
-        return texto
+        return texto, False
 
     if len(texto) > 7:
         texto = texto[-7:]
 
     if REGEX_PLACA.match(texto):
-        return texto
+        return texto, False
 
     corrigido = list(texto)
     n = len(corrigido)
@@ -166,7 +166,7 @@ def corrigir_ocr(texto):
 
     for i in [5, 6]:
         if i < n:
-            if alvo[i] in 'GODQC':
+            if alvo[i] in 'GODQC6':
                 alvo[i] = '0'
             elif alvo[i] in 'I':
                 alvo[i] = '1'
@@ -189,27 +189,29 @@ def corrigir_ocr(texto):
         elif alvo[4] in '6G':
             alvo[4] = 'G'
 
+    inferido = False
     if n == 6:
         prefixo = ''.join(alvo[:6])
         for digito in '0123456789':
             tentativa = prefixo + digito
             if REGEX_PLACA.match(tentativa):
-                return tentativa
+                return tentativa, True
+        inferido = True
 
     resultado = ''.join(alvo[:7])
     if REGEX_PLACA.match(resultado):
-        return resultado
+        return resultado, inferido
 
     if len(resultado) == 7 and resultado[0] == 'D':
         resultado_tentativa = 'G' + resultado[1:]
         if REGEX_PLACA.match(resultado_tentativa):
-            return resultado_tentativa
+            return resultado_tentativa, inferido
 
-    return texto
+    return texto, False
 
 
 def ocr_placa(img_color, x, y, w, h, reader, idx=0, is_closeup=False):
-    margem = 5
+    margem = 15 if is_closeup else 5
     y1 = max(0, y - margem)
     y2 = min(img_color.shape[0], y + h + margem)
     x1 = max(0, x - margem)
@@ -219,7 +221,7 @@ def ocr_placa(img_color, x, y, w, h, reader, idx=0, is_closeup=False):
 
     h_c, w_c = placa_gray.shape
 
-    angulos = [0, 2, 4, 6, 8] if is_closeup else [5, 6, 7, 8, 9]
+    angulos = [0, 2, 4, 6, 7, 8] if is_closeup else [5, 6, 7, 8, 9]
 
     candidatos_validos = []
     todos_textos = []
@@ -253,6 +255,10 @@ def ocr_placa(img_color, x, y, w, h, reader, idx=0, is_closeup=False):
             img_invertida = cv2.bitwise_not(img_borda)
             cv2.imwrite(f'tests/debug_ocr_inv_c{idx}.png', img_invertida)
             variacoes = [('normal', img_borda), ('invertida', img_invertida)]
+        elif is_closeup and angulo in (4, 7):
+            img_invertida = cv2.bitwise_not(img_borda)
+            variacoes = [('normal', img_borda), ('invertida', img_invertida)]
+            melhor_img = img_borda
         else:
             variacoes = [('normal', img_borda)]
             melhor_img = img_borda
@@ -261,11 +267,12 @@ def ocr_placa(img_color, x, y, w, h, reader, idx=0, is_closeup=False):
             resultados = reader.readtext(img_tentativa, detail=1, paragraph=False)
             for (bbox, texto, conf) in resultados:
                 texto_limpo = re.sub(r'[^A-Z0-9]', '', texto.upper())
-                texto_corrigido = corrigir_ocr(texto_limpo)
-                print(f"    ang={angulo} {nome}: {texto_limpo!r} (conf={conf:.2f}) -> {texto_corrigido!r}")
-                todos_textos.append((texto_corrigido, conf, img_borda))
+                texto_corrigido, inferido = corrigir_ocr(texto_limpo)
+                conf_ajustada = conf * 0.3 if inferido else conf
+                print(f"    ang={angulo} {nome}: {texto_limpo!r} (conf={conf:.2f}) -> {texto_corrigido!r} {'[INFERIDO]' if inferido else ''}")
+                todos_textos.append((texto_corrigido, conf_ajustada, img_borda))
                 if REGEX_PLACA.match(texto_corrigido) and len(texto_corrigido) == 7:
-                    candidatos_validos.append((texto_corrigido, conf, img_borda))
+                    candidatos_validos.append((texto_corrigido, conf_ajustada, img_borda))
 
     if candidatos_validos:
         candidatos_validos.sort(key=lambda x: x[1], reverse=True)
@@ -381,64 +388,24 @@ def main():
     reader = easyocr.Reader(['en'], gpu=False, verbose=False)
     print(f"      Modelo carregado em {time.time() - t0:.1f}s")
 
-    print(f"\n[2/5] Carregando imagem: {caminho}")
-    img = preprocessar_imagem(caminho)
+    print(f"\n[2/5] Processando imagem: {caminho}")
+    resultado = processar_imagem(caminho, reader, autorizados, output_dir='tests', verbose=True)
 
-    print("[3/5] Detectando candidatos a placa...")
-    candidatos, _ = encontrar_candidatos(img)
-    print(f"      Encontrados {len(candidatos)} candidatos.")
-
-    print("\n[4/5] Executando OCR nos candidatos...")
-    placa_encontrada = None
-    coords_placa = None
-    for idx, (x, y, w, h) in enumerate(candidatos):
-        print(f"\n--- Candidato {idx}: ({x},{y},{w},{h}) ---")
-        texto, img_ocr = ocr_placa(img, x, y, w, h, reader, idx=idx)
-        print(f"  Melhor resultado: {texto!r}")
-
-        if REGEX_PLACA.match(texto) and len(texto) == 7:
-            placa_encontrada = texto
-            coords_placa = (x, y, w, h)
-            break
-
-    print("\n[5/5] Verificando acesso...")
-    if placa_encontrada:
-        x, y, w, h = coords_placa
-        liberado, morador = verificar_acesso(placa_encontrada, autorizados)
-
-        if liberado:
-            cor = (0, 255, 0)
-            status = "LIBERADO"
-            info = f"{morador['nome']} - Apto {morador['apartamento']}"
-            print(f"\n[OK] ACESSO {status}: {placa_encontrada}")
-            print(f"     Morador: {info}")
-            print(f"     Veiculo: {morador.get('veiculo', 'N/A')}")
-        else:
-            cor = (0, 0, 255)
-            status = "BLOQUEADO"
-            print(f"\n[BLOQUEADO] ACESSO {status}: {placa_encontrada}")
-            print(f"     Motivo: Placa nao cadastrada no sistema.")
-
-        cv2.rectangle(img, (x, y), (x + w, y + h), cor, 3)
-        label = f"{placa_encontrada} - {status}"
-        cv2.putText(img, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, cor, 2)
-
-        if liberado:
-            info_text = f"{morador['nome']} - Apto {morador['apartamento']}"
-            cv2.putText(img, info_text, (x, y + h + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, cor, 2)
-
-        log_txt = registrar_log_txt(placa_encontrada, liberado, morador)
-        registrar_log_csv(placa_encontrada, liberado, morador)
+    print("\n[3/5] Verificando acesso...")
+    if resultado['placa']:
+        print(f"\n[OK] ACESSO {resultado['status']}: {resultado['placa']}")
+        if resultado['morador']:
+            print(f"     Morador: {resultado['morador']['nome']} - Apto {resultado['morador']['apartamento']}")
+            print(f"     Veiculo: {resultado['morador'].get('veiculo', 'N/A')}")
+        log_txt = registrar_log_txt(resultado['placa'], resultado['liberado'], resultado['morador'])
+        registrar_log_csv(resultado['placa'], resultado['liberado'], resultado['morador'])
         print(f"     Log: {log_txt}")
-
-        registrar_placa(placa_encontrada)
-        cv2.imwrite('tests/debug_resultado.png', img)
+        registrar_placa(resultado['placa'])
     else:
         print("\n[AVISO] Nenhuma placa valida encontrada para verificar acesso.")
-        cv2.imwrite('tests/debug_resultado.png', img)
 
     print(f"\nTempo total: {time.time() - inicio:.1f}s")
-    return placa_encontrada
+    return resultado['placa']
 
 
 if __name__ == "__main__":
