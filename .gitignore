@@ -26,5 +26,15 @@ acessos.txt
 acessos.csv
 registro_placas.csv
 
+# Banco SQLite (criado em runtime)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Imagens de teste (originais, manter)
+!test_images/*.jpg
+!test_images/*.png
+
 # Mantém apenas debug_resultado.png como exemplo
 !tests/debug_resultado.png
